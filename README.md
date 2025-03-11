@@ -1,6 +1,21 @@
 dejavu
 ==========
 
+
+
+psql -U postgres
+CREATE DATABASE dejavu;
+before running 
+sh ./test_dejavu.sh
+
+
+
+Read 
+============
+https://github.com/worldveil/dejavu/issues/251
+
+
+
 Audio fingerprinting and recognition algorithm implemented in Python, see the explanation here:  
 [How it works](http://willdrevo.com/fingerprinting-and-audio-recognition-with-python/)
 

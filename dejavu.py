@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import numpy as np
 from argparse import RawTextHelpFormatter
 from os.path import isdir
 
@@ -24,6 +25,19 @@ def init(configpath):
 
     # create a Dejavu instance
     return Dejavu(config)
+
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, bytes):
+            return obj.decode('utf-8')
+        return super(NumpyEncoder, self).default(obj)
 
 
 if __name__ == '__main__':
@@ -81,4 +95,9 @@ if __name__ == '__main__':
             songs = djv.recognize(MicrophoneRecognizer, seconds=opt_arg)
         elif source == 'file':
             songs = djv.recognize(FileRecognizer, opt_arg)
-        print(songs)
+        
+        # Print as JSON with custom encoder for NumPy types
+        if songs:
+            print(json.dumps(songs, cls=NumpyEncoder))
+        else:
+            print("None")

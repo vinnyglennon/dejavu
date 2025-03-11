@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import re
+import ast
 import subprocess
 import traceback
 from os import listdir, makedirs, walk
@@ -17,6 +18,17 @@ from dejavu.config.settings import (DEFAULT_FS, DEFAULT_OVERLAP_RATIO,
                                     OFFSET, RESULTS, SONG_NAME, TOTAL_TIME)
 from dejavu.logic.decoder import get_audio_name_from_path
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, bytes):
+            return obj.decode('utf-8')
+        return super(NumpyEncoder, self).default(obj)
 
 class DejavuTest:
     def __init__(self, folder, seconds):
@@ -106,6 +118,7 @@ class DejavuTest:
             fig_name = join(results_folder, f"{name}_{self.test_seconds[sec]}.png")
             fig.savefig(fig_name)
 
+               
     def begin(self):
         for f in self.test_files:
             log_msg('--------------------------------------------------')
@@ -125,57 +138,84 @@ class DejavuTest:
                 'file',
                 join(self.test_folder, f)])
 
+            result = result.decode('utf-8').strip() if isinstance(result, bytes) else result.strip()
+            
             if result.strip() == "None":
                 log_msg('No match')
                 self.result_match[line][col] = 'no'
                 self.result_matching_times[line][col] = 0
                 self.result_query_duration[line][col] = 0
                 self.result_match_confidence[line][col] = 0
-
+            
             else:
-                result = result.strip()
-                # we parse the output song back to a json
-                result = json.loads(result.decode('utf-8').replace("'", '"').replace(': b"', ':"'))
+                # Use ast.literal_eval to safely evaluate the Python expression
+                try:
+                    # Parse the Python dictionary string
+                    parsed_dict = ast.literal_eval(result)
+                    
+                    # Convert bytes to strings and NumPy types to Python native types
+                    def convert_types(obj):
+                        if isinstance(obj, bytes):
+                            return obj.decode('utf-8')
+                        elif hasattr(obj, 'item') and callable(getattr(obj, 'item')):  # Handle np.float64, np.int64, etc.
+                            return obj.item()
+                        elif isinstance(obj, dict):
+                            return {k: convert_types(v) for k, v in obj.items()}
+                        elif isinstance(obj, list):
+                            return [convert_types(i) for i in obj]
+                        else:
+                            return obj
+                    
+                    # Convert the parsed dictionary
+                    result = convert_types(parsed_dict)
+                    # which song did we predict? We consider only the first match.
+                    match = result[RESULTS][0]
+                    song_result = match[SONG_NAME]
+                    log_msg(f'song: {song}')
+                    log_msg(f'song_result: {song_result}')
+                    
+                    if song_result != song:
+                        log_msg('invalid match')
+                        self.result_match[line][col] = 'invalid'
+                        self.result_matching_times[line][col] = 0
+                        self.result_query_duration[line][col] = 0
+                        self.result_match_confidence[line][col] = 0
+                    else:
+                        log_msg('correct match')
+                        print(self.result_match)
+                        self.result_match[line][col] = 'yes'
+                        self.result_query_duration[line][col] = round(result[TOTAL_TIME], 3)
+                        self.result_match_confidence[line][col] = match[HASHES_MATCHED]
 
-                # which song did we predict? We consider only the first match.
-                match = result[RESULTS][0]
-                song_result = match[SONG_NAME]
-                log_msg(f'song: {song}')
-                log_msg(f'song_result: {song_result}')
+                        # using replace in f for getting rid of underscores in name
+                        song_start_time = re.findall("_[^_]+", f.replace(song, ""))
+                        song_start_time = song_start_time[0].lstrip("_ ")
 
-                if song_result != song:
-                    log_msg('invalid match')
-                    self.result_match[line][col] = 'invalid'
+                        result_start_time = round((match[OFFSET] * DEFAULT_WINDOW_SIZE *
+                                                   DEFAULT_OVERLAP_RATIO) / DEFAULT_FS, 0)
+
+                        self.result_matching_times[line][col] = int(result_start_time) - int(song_start_time)
+                        if abs(self.result_matching_times[line][col]) == 1:
+                            self.result_matching_times[line][col] = 0
+
+                        log_msg(f'query duration: {round(result[TOTAL_TIME], 3)}')
+                        log_msg(f'confidence: {match[HASHES_MATCHED]}')
+                        log_msg(f'song start_time: {song_start_time}')
+                        log_msg(f'result start time: {result_start_time}')
+
+                        if self.result_matching_times[line][col] == 0:
+                            log_msg('accurate match')
+                        else:
+                            log_msg('inaccurate match')
+                except (SyntaxError, ValueError) as e:
+                    print(f"Error parsing result: {e}")
+                    print(f"Result was: {result}")
+                    self.result_match[line][col] = 'error'
                     self.result_matching_times[line][col] = 0
                     self.result_query_duration[line][col] = 0
                     self.result_match_confidence[line][col] = 0
-                else:
-                    log_msg('correct match')
-                    print(self.result_match)
-                    self.result_match[line][col] = 'yes'
-                    self.result_query_duration[line][col] = round(result[TOTAL_TIME], 3)
-                    self.result_match_confidence[line][col] = match[HASHES_MATCHED]
+                    continue
 
-                    # using replace in f for getting rid of underscores in name
-                    song_start_time = re.findall("_[^_]+", f.replace(song, ""))
-                    song_start_time = song_start_time[0].lstrip("_ ")
-
-                    result_start_time = round((match[OFFSET] * DEFAULT_WINDOW_SIZE *
-                                               DEFAULT_OVERLAP_RATIO) / DEFAULT_FS, 0)
-
-                    self.result_matching_times[line][col] = int(result_start_time) - int(song_start_time)
-                    if abs(self.result_matching_times[line][col]) == 1:
-                        self.result_matching_times[line][col] = 0
-
-                    log_msg(f'query duration: {round(result[TOTAL_TIME], 3)}')
-                    log_msg(f'confidence: {match[HASHES_MATCHED]}')
-                    log_msg(f'song start_time: {song_start_time}')
-                    log_msg(f'result start time: {result_start_time}')
-
-                    if self.result_matching_times[line][col] == 0:
-                        log_msg('accurate match')
-                    else:
-                        log_msg('inaccurate match')
             log_msg('--------------------------------------------------\n')
 
 
@@ -257,10 +297,12 @@ def generate_test_files(src, dest, nseconds, fmts=[".mp3", ".wav"], padding=10):
             test_file_name = f"{join(dest, filename)}_{starttime}_{nseconds}sec.{extension.replace('.', '')}"
 
             subprocess.check_output([
-                "ffmpeg", "-y",
+                "ffmpeg", "-y", 
+                "-vn",
                 "-ss", f"{starttime}",
                 '-t', f"{nseconds}",
                 "-i", audiosource,
+                "-c:a", "copy",
                 test_file_name])
 
 

@@ -7,7 +7,7 @@ from dejavu.logic.recognizer.microphone_recognizer import MicrophoneRecognizer
 # load config from a JSON file (or anything outputting a python dictionary)
 config = {
     "database": {
-        "host": "db",
+        "host": "db", # use "127.0.0.1" if testing locally via python ./example_docker_postgres.py
         "user": "postgres",
         "password": "password",
         "database": "dejavu"
