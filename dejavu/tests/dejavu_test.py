@@ -298,7 +298,6 @@ def generate_test_files(src, dest, nseconds, fmts=[".mp3", ".wav"], padding=10):
 
             subprocess.check_output([
                 "ffmpeg", "-y", 
-                "-vn",
                 "-ss", f"{starttime}",
                 '-t', f"{nseconds}",
                 "-i", audiosource,
